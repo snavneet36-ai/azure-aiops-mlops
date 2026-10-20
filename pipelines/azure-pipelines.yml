@@ -12,55 +12,208 @@ pr:
 pool:
   vmImage: ubuntu-latest
 
+variables:
+  pythonVersion: '3.12'
+  terraformVersion: '1.15.8'
+
 stages:
-  - stage: PythonTests
-    displayName: Python ML Tests
-    jobs:
-      - job: RunPythonTests
-        displayName: Install dependencies and run tests
-        steps:
-          - checkout: self
 
-          - task: UsePythonVersion@0
-            inputs:
-              versionSpec: '3.12'
-            displayName: Select Python
+# --------------------------------------------------
+# 1. PYTHON TESTS
+# --------------------------------------------------
+- stage: PythonTests
+  displayName: Python ML Tests
+  jobs:
+  - job: Test
+    steps:
+    - checkout: self
 
-          - script: |
-              python -m pip install --upgrade pip
-              python -m pip install -r requirements.txt
-              python -m pip install pytest
-            displayName: Install Python dependencies
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: $(pythonVersion)
 
-          - script: |
-              python -m pytest tests/ -v
-            displayName: Run automated tests
+    - script: |
+        python -m pip install --upgrade pip
+        python -m pip install -r requirements.txt
+        python -m pip install pytest
+      displayName: Install dependencies
 
-  - stage: TerraformValidation
-    displayName: Terraform Format and Validation
-    dependsOn: PythonTests
-    jobs:
-      - job: ValidateTerraform
-        displayName: Validate Terraform configuration
-        steps:
-          - checkout: self
+    - script: |
+        python -m pytest tests/ -v
+      displayName: Run unit tests
 
-          - bash: |
-              set -e
-              TERRAFORM_VERSION="1.15.8"
-              curl -fsSLo terraform.zip \
-                "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
-              unzip -o terraform.zip
-              sudo install terraform /usr/local/bin/terraform
-              terraform version
-            displayName: Install Terraform
+# --------------------------------------------------
+# 2. NON-BLOCKING SECURITY SCANNING
+# Findings and scanner errors are reported, but do not
+# stop the pipeline solely because of security scans.
+# --------------------------------------------------
+- stage: SecurityScan
+  displayName: Security Scanning
+  dependsOn: PythonTests
+  condition: succeeded()
+  jobs:
+  - job: Scan
+    steps:
+    - checkout: self
+      fetchDepth: 0
 
-          - bash: |
-              terraform fmt -check -recursive
-            displayName: Check Terraform formatting
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: $(pythonVersion)
 
-          - bash: |
-              terraform init -backend=false
-              terraform validate
-            workingDirectory: environments/dev
-            displayName: Initialize and validate Terraform
+    - bash: |
+        mkdir -p "$(Build.ArtifactStagingDirectory)/security-reports"
+
+        # Install tools; report failures without blocking later steps.
+        python -m pip install semgrep checkov
+        pip_rc=$?
+        echo "Scanner package installation exit code: $pip_rc"
+
+        # Gitleaks
+        if ! command -v gitleaks >/dev/null 2>&1; then
+          echo "Gitleaks is not installed on this agent."
+          echo "Install a pinned Gitleaks release to enable this scan."
+        else
+          gitleaks git . \
+            --redact \
+            --report-format json \
+            --report-path "$(Build.ArtifactStagingDirectory)/security-reports/gitleaks.json"
+          echo "Gitleaks exit code: $?"
+        fi
+
+        # Semgrep SAST
+        if command -v semgrep >/dev/null 2>&1; then
+          semgrep scan \
+            --config p/python \
+            --config p/terraform \
+            --json \
+            --output "$(Build.ArtifactStagingDirectory)/security-reports/semgrep.json" \
+            .
+          echo "Semgrep exit code: $?"
+        else
+          echo "Semgrep unavailable; scan skipped."
+        fi
+
+        # Checkov IaC scan
+        if command -v checkov >/dev/null 2>&1; then
+          checkov -d environments/dev \
+            --framework terraform \
+            --output json \
+            --output-file-path "$(Build.ArtifactStagingDirectory)/security-reports"
+          echo "Checkov exit code: $?"
+        else
+          echo "Checkov unavailable; scan skipped."
+        fi
+
+        # This script intentionally exits successfully so findings
+        # or scanner errors alone do not block later stages.
+        exit 0
+      displayName: Run non-blocking security scans
+
+    - task: PublishPipelineArtifact@1
+      condition: always()
+      inputs:
+        targetPath: $(Build.ArtifactStagingDirectory)/security-reports
+        artifact: security-reports
+      displayName: Publish security reports
+
+# --------------------------------------------------
+# 3. TERRAFORM VALIDATION
+# --------------------------------------------------
+- stage: TerraformValidation
+  displayName: Terraform Validation
+  dependsOn:
+  - PythonTests
+  - SecurityScan
+  condition: succeeded()
+  jobs:
+  - job: Validate
+    steps:
+    - checkout: self
+
+    - bash: |
+        set -euo pipefail
+        VERSION="$(terraformVersion)"
+        curl -fsSLo terraform.zip \
+          "https://releases.hashicorp.com/terraform/${VERSION}/terraform_${VERSION}_linux_amd64.zip"
+        unzip -o terraform.zip
+        sudo install terraform /usr/local/bin/terraform
+        terraform version
+      displayName: Install Terraform
+
+    - bash: |
+        set -euo pipefail
+        terraform fmt -check -recursive
+      displayName: Check Terraform formatting
+
+    - bash: |
+        set -euo pipefail
+        terraform init -backend=false
+        terraform validate
+      workingDirectory: environments/dev
+      displayName: Initialize and validate Terraform
+
+# --------------------------------------------------
+# 4. TERRAFORM PLAN
+# Add remote backend and Azure authentication before
+# enabling this stage.
+# --------------------------------------------------
+- stage: TerraformPlan
+  displayName: Terraform Plan
+  dependsOn: TerraformValidation
+  condition: |
+    and(
+      succeeded(),
+      eq(variables['Build.SourceBranch'], 'refs/heads/main'),
+      ne(variables['Build.Reason'], 'PullRequest')
+    )
+  jobs:
+  - job: Plan
+    steps:
+    - checkout: self
+    - bash: |
+        echo "Terraform validation completed."
+        echo "Remote backend and Azure service connection must be configured."
+        echo "Plan execution is intentionally not enabled yet."
+      displayName: Plan stage preparation
+
+# --------------------------------------------------
+# 5. MANUAL APPROVAL
+# --------------------------------------------------
+- stage: ApplyApproval
+  displayName: Apply Approval
+  dependsOn: TerraformPlan
+  condition: succeeded()
+  jobs:
+  - job: Approval
+    displayName: Wait for approval
+    pool: server
+    timeoutInMinutes: 1440
+    steps:
+    - task: ManualValidation@1
+      timeoutInMinutes: 1440
+      inputs:
+        notifyUsers: ''
+        approvers: ''
+        allowApproversToApproveTheirOwnRuns: false
+        instructions: |
+          Review the Terraform plan and security reports.
+          Approve only after remote state and deployment permissions
+          have been configured and the plan is verified.
+        onTimeout: reject
+
+# --------------------------------------------------
+# 6. TERRAFORM APPLY
+# --------------------------------------------------
+- stage: TerraformApply
+  displayName: Terraform Apply
+  dependsOn: ApplyApproval
+  condition: succeeded()
+  jobs:
+  - job: Apply
+    steps:
+    - checkout: self
+    - bash: |
+        echo "Apply is not enabled yet."
+        echo "Configure remote state, Azure authentication and an approved plan first."
+      displayName: Apply stage preparation
