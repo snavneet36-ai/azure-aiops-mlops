@@ -1,4 +1,3 @@
-
 variable "resource_groups" {
   description = "Azure Resource Group configurations"
 
@@ -24,6 +23,7 @@ variable "monitoring_workspaces" {
   type = map(object({
     name               = string
     resource_group_key = string
+    location           = string
     retention_in_days  = number
   }))
 }
@@ -45,13 +45,12 @@ variable "metric_alerts" {
 }
 
 variable "action_groups" {
-  description = "Action Group configurations"
+  description = "Azure Monitor Action Group configurations"
 
   type = map(object({
     name          = string
     short_name    = string
     email_name    = string
     email_address = string
-
   }))
 }
