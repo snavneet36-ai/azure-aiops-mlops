@@ -1,3 +1,4 @@
+
 resource_groups = {
   aiops_dev = {
     location = "Central India"
@@ -21,6 +22,7 @@ monitoring_workspaces = {
   primary = {
     name               = "aiops-mlops-law-dev"
     resource_group_key = "aiops_monitoring"
+    location           = "Central India"
     retention_in_days  = 30
   }
 }
@@ -30,14 +32,12 @@ metric_alerts = {
     name                = "aiops-storage-transaction-alert"
     resource_group_key  = "aiops_monitoring"
     storage_account_key = "metrics"
-
-    metric_name = "Transactions"
-    threshold   = 1000
-    severity    = 2
-
-    frequency        = "PT1M"
-    window_size      = "PT5M"
-    action_group_key = "operations"
+    metric_name         = "Transactions"
+    threshold           = 1000
+    severity            = 2
+    frequency           = "PT1M"
+    window_size         = "PT5M"
+    action_group_key    = "operations"
   }
 }
 
@@ -48,4 +48,4 @@ action_groups = {
     email_name    = "operations-alert"
     email_address = "bb7943239@gmail.com"
   }
-}  
+}
