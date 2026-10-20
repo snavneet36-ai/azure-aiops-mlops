@@ -1,0 +1,66 @@
+
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+  - stage: PythonTests
+    displayName: Python ML Tests
+    jobs:
+      - job: RunPythonTests
+        displayName: Install dependencies and run tests
+        steps:
+          - checkout: self
+
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '3.12'
+            displayName: Select Python
+
+          - script: |
+              python -m pip install --upgrade pip
+              python -m pip install -r requirements.txt
+              python -m pip install pytest
+            displayName: Install Python dependencies
+
+          - script: |
+              python -m pytest tests/ -v
+            displayName: Run automated tests
+
+  - stage: TerraformValidation
+    displayName: Terraform Format and Validation
+    dependsOn: PythonTests
+    jobs:
+      - job: ValidateTerraform
+        displayName: Validate Terraform configuration
+        steps:
+          - checkout: self
+
+          - bash: |
+              set -e
+              TERRAFORM_VERSION="1.15.8"
+              curl -fsSLo terraform.zip \
+                "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+              unzip -o terraform.zip
+              sudo install terraform /usr/local/bin/terraform
+              terraform version
+            displayName: Install Terraform
+
+          - bash: |
+              terraform fmt -check -recursive
+            displayName: Check Terraform formatting
+
+          - bash: |
+              terraform init -backend=false
+              terraform validate
+            workingDirectory: environments/dev
+            displayName: Initialize and validate Terraform
