@@ -12,11 +12,6 @@ pool:
 variables:
   pythonVersion: '3.12'
   terraformVersion: '1.15.8'
-
-<<<<<<< HEAD
-  # Configure these in Azure DevOps Pipeline Variables.
-=======
->>>>>>> 33f580c (adding tfvars and modified pipelines)
   azureServiceConnection: 'sc-azure-aiops-dev'
   backendResourceGroup: 'terraformrg'
   backendStorageAccount: 'pipeline1234556'
@@ -42,15 +37,11 @@ stages:
         python -m pip install --upgrade pip
         python -m pip install -r requirements.txt pytest
         python -m pytest tests/ -v
-<<<<<<< HEAD
-      displayName: Install dependencies and run tests
-=======
       displayName: Run Python tests
->>>>>>> 33f580c (adding tfvars and modified pipelines)
 
-# 2. NON-BLOCKING SECURITY SCANS
+# 2. SECURITY SCANS - NON-BLOCKING
 - stage: SecurityScan
-  displayName: Security Scanning (Non-blocking)
+  displayName: Security Scanning
   dependsOn: PythonTests
   condition: always()
   jobs:
@@ -63,146 +54,84 @@ stages:
         mkdir -p "$(Build.ArtifactStagingDirectory)/security-reports"
         cd "$(Build.SourcesDirectory)"
         REPORT="$(Build.ArtifactStagingDirectory)/security-reports"
-
-<<<<<<< HEAD
-        # Install scanners. Scanner findings/errors must not stop this stage.
-        python -m pip install semgrep checkov || true
-
-        # Gitleaks
-        if ! command -v gitleaks >/dev/null 2>&1; then
-          curl -fsSL \
-            https://github.com/gitleaks/gitleaks/releases/download/v8.24.2/gitleaks_8.24.2_linux_x64.tar.gz \
-            -o /tmp/gitleaks.tar.gz &&
-          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
-        fi
-
-        if [ -x /tmp/gitleaks ]; then
-          /tmp/gitleaks git . --redact \
-            --report-format json \
-            --report-path "$(Build.ArtifactStagingDirectory)/security-reports/gitleaks.json" \
-            || echo "Gitleaks findings/error; review logs."
-        else
-          echo "Gitleaks installation failed; scan unavailable."
-        fi
-
-        # Semgrep
-=======
-        # Do not fail this job because of scanner findings or installation errors.
         set +e
 
-        echo "=== Installing Python security scanners ==="
+        echo "=== Installing Python scanners ==="
         python -m pip install semgrep checkov bandit pip-audit
         echo "Python scanner installation exit code: $?"
 
-        echo "=== Gitleaks: scan Git history ==="
+        echo "=== Gitleaks ==="
         if curl -fsSL \
           https://github.com/gitleaks/gitleaks/releases/download/v8.24.2/gitleaks_8.24.2_linux_x64.tar.gz \
           -o /tmp/gitleaks.tar.gz &&
           tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks; then
-          /tmp/gitleaks git . \
-            --redact \
+          /tmp/gitleaks git . --redact \
             --report-format json \
             --report-path "$REPORT/gitleaks.json" \
             > "$REPORT/gitleaks.log" 2>&1
           echo "Gitleaks exit code: $?"
         else
-          echo "Gitleaks installation failed; scan unavailable."
+          echo "Gitleaks installation failed."
         fi
 
-        echo "=== Checkov: Terraform security ==="
+        echo "=== Checkov ==="
         if command -v checkov >/dev/null 2>&1; then
-          checkov -d environments/dev \
-            --framework terraform \
-            --output json \
-            > "$REPORT/checkov.json" 2> "$REPORT/checkov.log"
+          checkov -d environments/dev --framework terraform \
+            --output json > "$REPORT/checkov.json" \
+            2> "$REPORT/checkov.log"
           echo "Checkov exit code: $?"
         else
           echo "Checkov unavailable."
         fi
 
-        echo "=== tfsec: Terraform security ==="
+        echo "=== tfsec ==="
         if curl -fsSL \
           https://github.com/aquasecurity/tfsec/releases/download/v1.28.11/tfsec-linux-amd64 \
           -o /tmp/tfsec; then
           chmod +x /tmp/tfsec
-          /tmp/tfsec environments/dev \
-            --format json \
+          /tmp/tfsec environments/dev --format json \
             --out "$REPORT/tfsec.json" \
             > "$REPORT/tfsec.log" 2>&1
           echo "tfsec exit code: $?"
         else
-          echo "tfsec installation failed; scan unavailable."
+          echo "tfsec installation failed."
         fi
 
-        echo "=== TFLint: Terraform lint ==="
+        echo "=== TFLint ==="
         if curl -sSfL \
           https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh \
           -o /tmp/install_tflint.sh &&
           bash /tmp/install_tflint.sh; then
           tflint --init > "$REPORT/tflint-init.log" 2>&1
-          tflint --chdir=environments/dev \
-            --format=json \
+          tflint --chdir=environments/dev --format=json \
             > "$REPORT/tflint.json" 2> "$REPORT/tflint.log"
           echo "TFLint exit code: $?"
         else
-          echo "TFLint installation failed; scan unavailable."
+          echo "TFLint installation failed."
         fi
 
-        echo "=== Semgrep: Python and Terraform ==="
->>>>>>> 33f580c (adding tfvars and modified pipelines)
+        echo "=== Semgrep ==="
         if command -v semgrep >/dev/null 2>&1; then
           semgrep scan --config p/python --config p/terraform \
-            --json \
-<<<<<<< HEAD
-            --output "$(Build.ArtifactStagingDirectory)/security-reports/semgrep.json" \
-            . || echo "Semgrep findings/error; review logs."
-=======
-            --output "$REPORT/semgrep.json" \
-            . > "$REPORT/semgrep.log" 2>&1
+            --json --output "$REPORT/semgrep.json" . \
+            > "$REPORT/semgrep.log" 2>&1
           echo "Semgrep exit code: $?"
->>>>>>> 33f580c (adding tfvars and modified pipelines)
         else
           echo "Semgrep unavailable."
         fi
 
-<<<<<<< HEAD
-        # Checkov
-        if command -v checkov >/dev/null 2>&1; then
-          checkov -d environments/dev --framework terraform \
-            --output json \
-            --output-file-path "$(Build.ArtifactStagingDirectory)/security-reports" \
-            || echo "Checkov findings/error; review logs."
-        else
-          echo "Checkov unavailable."
-        fi
-
-        # tfsec
-        curl -fsSL \
-          https://github.com/aquasecurity/tfsec/releases/download/v1.28.11/tfsec-linux-amd64 \
-          -o /tmp/tfsec &&
-        chmod +x /tmp/tfsec &&
-        /tmp/tfsec environments/dev \
-          --format json \
-          --out "$(Build.ArtifactStagingDirectory)/security-reports/tfsec.json" \
-          || echo "tfsec findings/installation error; review logs."
-
-        exit 0
-      displayName: Run security scans without blocking
-=======
-        echo "=== Bandit: Python security ==="
+        echo "=== Bandit ==="
         if command -v bandit >/dev/null 2>&1; then
-          bandit -r src tests -f json \
-            -o "$REPORT/bandit.json" \
+          bandit -r src tests -f json -o "$REPORT/bandit.json" \
             > "$REPORT/bandit.log" 2>&1
           echo "Bandit exit code: $?"
         else
           echo "Bandit unavailable."
         fi
 
-        echo "=== pip-audit: dependency vulnerabilities ==="
+        echo "=== pip-audit ==="
         if command -v pip-audit >/dev/null 2>&1; then
-          pip-audit -r requirements.txt \
-            -f json \
+          pip-audit -r requirements.txt -f json \
             -o "$REPORT/pip-audit.json" \
             > "$REPORT/pip-audit.log" 2>&1
           echo "pip-audit exit code: $?"
@@ -210,11 +139,9 @@ stages:
           echo "pip-audit unavailable."
         fi
 
-        echo "=== Security scan summary ==="
-        echo "Review scanner JSON reports and logs in the security-reports artifact."
+        echo "All scanner commands completed. Review the reports."
         exit 0
-      displayName: Run scanners without blocking pipeline
->>>>>>> 33f580c (adding tfvars and modified pipelines)
+      displayName: Run security scanners without blocking
 
     - task: PublishPipelineArtifact@1
       condition: always()
@@ -246,34 +173,16 @@ stages:
       displayName: Install Terraform
 
     - bash: terraform fmt -check -recursive
-<<<<<<< HEAD
-      displayName: Check formatting
-
-    - bash: |
-        set -e
-        terraform init -backend=false
-        terraform validate
-      workingDirectory: environments/dev
-      displayName: Validate Terraform
-
-# 4. REAL TERRAFORM PLAN
-=======
       displayName: Check Terraform formatting
 
     - bash: |
         set -e
-        test -f terraform.tfvars || {
-          echo "ERROR: environments/dev/terraform.tfvars is missing."
-          echo "Provide non-secret values in Git or use a secure pipeline file/variables."
-          exit 1
-        }
         terraform init -backend=false -input=false
         terraform validate
       workingDirectory: environments/dev
-      displayName: Validate Terraform configuration
+      displayName: Validate Terraform
 
 # 4. TERRAFORM PLAN
->>>>>>> 33f580c (adding tfvars and modified pipelines)
 - stage: TerraformPlan
   displayName: Generate Terraform Plan
   dependsOn: TerraformValidation
@@ -294,10 +203,6 @@ stages:
           "https://releases.hashicorp.com/terraform/${VERSION}/terraform_${VERSION}_linux_amd64.zip"
         unzip -o /tmp/terraform.zip -d /tmp/terraform-bin
         sudo install /tmp/terraform-bin/terraform /usr/local/bin/terraform
-<<<<<<< HEAD
-=======
-        terraform version
->>>>>>> 33f580c (adding tfvars and modified pipelines)
       displayName: Install Terraform
 
     - task: AzureCLI@2
@@ -310,14 +215,11 @@ stages:
           set -euo pipefail
           cd environments/dev
 
-<<<<<<< HEAD
-=======
           test -f terraform.tfvars || {
-            echo "ERROR: terraform.tfvars is missing on the pipeline agent."
+            echo "ERROR: terraform.tfvars is missing."
             exit 1
           }
 
->>>>>>> 33f580c (adding tfvars and modified pipelines)
           terraform init -input=false -reconfigure \
             -backend-config="resource_group_name=$(backendResourceGroup)" \
             -backend-config="storage_account_name=$(backendStorageAccount)" \
@@ -325,20 +227,12 @@ stages:
             -backend-config="key=$(backendKey)" \
             -backend-config="use_azuread_auth=true"
 
-<<<<<<< HEAD
-          terraform plan -input=false -out=tfplan
-=======
           terraform plan -input=false -lock-timeout=5m -out=tfplan
->>>>>>> 33f580c (adding tfvars and modified pipelines)
           terraform show -no-color tfplan > plan.txt
 
           mkdir -p "$(Build.ArtifactStagingDirectory)/terraform-plan"
           cp tfplan plan.txt "$(Build.ArtifactStagingDirectory)/terraform-plan/"
-<<<<<<< HEAD
 
-=======
-    
->>>>>>> 33f580c (adding tfvars and modified pipelines)
     - task: PublishPipelineArtifact@1
       inputs:
         targetPath: $(Build.ArtifactStagingDirectory)/terraform-plan
@@ -360,21 +254,12 @@ stages:
       inputs:
         notifyUsers: ''
         instructions: |
-<<<<<<< HEAD
-          Open the terraform-plan artifact from the TerraformPlan stage.
-          Review plan.txt and confirm all proposed resource changes.
-          Approve only if the plan is correct.
-        onTimeout: reject
-
-# 6. APPLY THE EXACT SAVED PLAN
-=======
           Review the terraform-plan artifact from TerraformPlan.
-          Read plan.txt and verify every proposed resource change.
-          Resume this stage only when the plan is approved.
+          Read plan.txt and verify all proposed changes.
+          Resume this stage only after reviewing the plan.
         onTimeout: reject
 
-# 6. APPLY THE SAVED PLAN
->>>>>>> 33f580c (adding tfvars and modified pipelines)
+# 6. APPLY THE APPROVED SAVED PLAN
 - stage: TerraformApply
   displayName: Apply Approved Terraform Plan
   dependsOn: ApplyApproval
@@ -401,11 +286,7 @@ stages:
       displayName: Install Terraform
 
     - task: AzureCLI@2
-<<<<<<< HEAD
-      displayName: Apply approved plan
-=======
       displayName: Apply approved Terraform plan
->>>>>>> 33f580c (adding tfvars and modified pipelines)
       inputs:
         azureSubscription: $(azureServiceConnection)
         scriptType: bash
@@ -421,11 +302,7 @@ stages:
             -backend-config="key=$(backendKey)" \
             -backend-config="use_azuread_auth=true"
 
-<<<<<<< HEAD
-          terraform apply -input=false \
-=======
           terraform apply -input=false -lock-timeout=5m \
->>>>>>> 33f580c (adding tfvars and modified pipelines)
             "$(Pipeline.Workspace)/terraform-plan/tfplan"
 
           terraform output
